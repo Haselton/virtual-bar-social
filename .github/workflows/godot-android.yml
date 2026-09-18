@@ -13,7 +13,7 @@ jobs:
       - name: Configure Android export
         run: |
           mkdir -p /root/.config/godot
-          keytool -keyalg RSA -genkeypair -alias androiddebugkey -keypass android -keystore /root/debug.keystore -storepass android -dname "CN=Android Debug,O=Android,C=US" -validity 10000
+          test -f /root/debug.keystore || keytool -keyalg RSA -genkeypair -alias androiddebugkey -keypass android -keystore /root/debug.keystore -storepass android -dname "CN=Android Debug,O=Android,C=US" -validity 10000
           godot --headless --editor --quit --path godot --editor-settings android/java_sdk_path=/usr/lib/jvm/java-17-openjdk-amd64 android/android_sdk_path=$ANDROID_HOME || true
       - name: Export Android
         working-directory: godot
