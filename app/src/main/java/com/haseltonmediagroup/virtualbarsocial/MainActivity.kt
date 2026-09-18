@@ -9,6 +9,8 @@ import android.view.inputmethod.InputMethodManager
 import android.widget.*
 import android.content.Context
 import kotlin.math.hypot
+import kotlin.math.atan2
+import kotlin.math.sin
 
 class MainActivity : Activity() {
     private lateinit var barView: BarView
@@ -91,7 +93,8 @@ class MainActivity : Activity() {
 class BarView(context: Context, private val onChat:(Int)->Unit) : View(context) {
     private val p=Paint(Paint.ANTI_ALIAS_FLAG)
     private var playerX=.5f; private var playerY=.78f
-    private var joyX=0f; private var joyY=0f; private var dragging=false
+    private var targetX=playerX; private var targetY=playerY
+    private var walking=false; private var walkPhase=0f; private var lastFrame=0L
     private val people=listOf(.25f to .39f,.48f to .45f,.73f to .38f,.72f to .63f,.29f to .64f)
     private var nearest=-1
     private val names=listOf("Guest 1","Guest 2","Guest 3","Guest 4","Guest 5")
@@ -118,18 +121,35 @@ class BarView(context: Context, private val onChat:(Int)->Unit) : View(context) 
             drawPerson(c,q.first*w,q.second*h,names[i],false,d<.17f)
         }
         if(best>=.17f) nearest=-1
-        drawPerson(c,playerX*w,playerY*h,"YOU",true,false)
+        val bob = if(walking) sin(walkPhase)*h*.0035f else 0f
+        drawPerson(c,playerX*w,playerY*h+bob,"YOU",true,false)
+        if(walking) { postInvalidateOnAnimation() }
 
-        val jx=w*.18f; val jy=h*.91f; val jr=w*.105f
-        p.color=0xBB000000.toInt(); c.drawCircle(jx,jy,jr,p)
-        p.style=Paint.Style.STROKE; p.strokeWidth=4f; p.color=0x88FFFFFF.toInt(); c.drawCircle(jx,jy,jr,p); p.style=Paint.Style.FILL
-        p.color=0xFFBFAE9C.toInt(); c.drawCircle(jx+joyX*jr*.55f,jy+joyY*jr*.55f,jr*.35f,p)
+        // Tap-to-walk: no joystick. A subtle destination marker shows where the avatar is headed.
+        if(walking) {
+            p.style=Paint.Style.STROKE; p.strokeWidth=3f; p.color=0x99FFC65A.toInt()
+            c.drawCircle(targetX*w,targetY*h,w*.025f,p); p.style=Paint.Style.FILL
+        }
         if(nearest>=0) {
             val l=w*.48f; val t=h*.875f; val r=w*.94f; val b=h*.95f
             p.color=0xFFFFB84D.toInt(); c.drawRoundRect(l,t,r,b,20f,20f,p)
             p.color=0xFF1A1214.toInt(); p.textSize=w*.04f; c.drawText("CHAT WITH ${names[nearest].uppercase()}",(l+r)/2,(t+b)/2+8f,p)
         } else {
-            p.color=0xFFB9A48A.toInt(); p.textSize=w*.029f; c.drawText("Walk near someone to chat",w*.7f,h*.915f,p)
+            p.color=0xFFB9A48A.toInt(); p.textSize=w*.029f; c.drawText("Tap anywhere on the floor to walk",w*.5f,h*.92f,p)
+        }
+
+        if(walking) {
+            val now=System.nanoTime()
+            if(lastFrame==0L) lastFrame=now
+            val dt=((now-lastFrame)/1_000_000_000f).coerceAtMost(.033f); lastFrame=now
+            val dx=targetX-playerX; val dy=targetY-playerY; val dist=hypot(dx,dy)
+            if(dist<.006f) { playerX=targetX; playerY=targetY; walking=false; lastFrame=0L }
+            else {
+                val speed=.28f
+                val step=(speed*dt).coerceAtMost(dist)
+                playerX += dx/dist*step; playerY += dy/dist*step
+                walkPhase += dt*14f
+            }
         }
     }
 
@@ -141,17 +161,16 @@ class BarView(context: Context, private val onChat:(Int)->Unit) : View(context) 
     }
 
     override fun onTouchEvent(e:MotionEvent):Boolean {
-        val w=width.toFloat(); val h=height.toFloat(); val jx=w*.18f; val jy=h*.91f; val jr=w*.13f
-        if(e.action==MotionEvent.ACTION_DOWN && nearest>=0 && e.x>w*.45f && e.y>h*.85f){ onChat(nearest); return true }
-        when(e.action) {
-            MotionEvent.ACTION_DOWN -> dragging=hypot(e.x-jx,e.y-jy)<jr
-            MotionEvent.ACTION_MOVE -> if(dragging) {
-                joyX=((e.x-jx)/jr).coerceIn(-1f,1f); joyY=((e.y-jy)/jr).coerceIn(-1f,1f)
-                val mag=hypot(joyX,joyY); if(mag>1){joyX/=mag;joyY/=mag}
-                playerX=(playerX+joyX*.018f).coerceIn(.07f,.93f)
-                playerY=(playerY+joyY*.018f).coerceIn(.31f,.82f); invalidate()
-            }
-            MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL -> {dragging=false;joyX=0f;joyY=0f;invalidate()}
+        if(e.action!=MotionEvent.ACTION_DOWN) return true
+        val w=width.toFloat(); val h=height.toFloat()
+        if(nearest>=0 && e.x>w*.45f && e.y>h*.85f){ onChat(nearest); return true }
+        // One tap chooses a destination. Keep movement inside the walkable floor.
+        if(e.y>=h*.29f && e.y<=h*.84f) {
+            targetX=(e.x/w).coerceIn(.07f,.93f)
+            targetY=(e.y/h).coerceIn(.31f,.82f)
+            walking=hypot(targetX-playerX,targetY-playerY)>.006f
+            lastFrame=0L
+            invalidate()
         }
         return true
     }
